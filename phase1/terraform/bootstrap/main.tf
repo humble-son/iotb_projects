@@ -15,9 +15,10 @@ data "aws_caller_identity" "current" {}
 
 resource "aws_s3_bucket" "tf_state_logs" {
   bucket = var.logs_bucket_name
+  force_destroy = true
    
   lifecycle {
-    prevent_destroy = true 
+    prevent_destroy = false 
   }
 
   tags = {
@@ -85,10 +86,11 @@ resource "aws_s3_bucket_policy" "tf_state_logs" {
 }
 
 resource "aws_s3_bucket" "tf_state" {
-  bucket = var.bucket_name 
+  bucket = var.bucket_name
+  force_destroy = true 
 
   lifecycle {
-    prevent_destroy = true 
+    prevent_destroy = false 
   }
 
   tags = {
