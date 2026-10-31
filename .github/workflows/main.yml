@@ -97,7 +97,7 @@ jobs:
           aws ecr get-login-password --region ${AWS_REGION} | \
             docker login --username AWS --password-stdin ${ECR_REGISTRY}
 
-          cd /opt/student-platform
+          cd /opt/phase3
 
           export ECR_REGISTRY="${ECR_REGISTRY}"
           export ECR_REPOSITORY="${ECR_REPOSITORY}"
