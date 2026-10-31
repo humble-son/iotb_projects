@@ -40,6 +40,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: phase3/package-lock.json
 
       # 3. Install dependencies and run tests
       - name: Install dependencies
