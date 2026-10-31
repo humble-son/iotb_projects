@@ -1,0 +1,161 @@
+name: Build and Deploy NestJS Application
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "phase3/**"
+      - ".github/workflows/deploy.yml"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+  EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./phase3
+
+    steps:
+      # 1. Checkout source code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Install Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # 3. Install dependencies and run tests
+      - name: Install dependencies
+        run: npm ci
+
+      # 4. Build NestJS application
+      - name: Build application
+        run: npm run build
+
+      # 5. Authenticate GitHub Actions with AWS using OIDC
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # 6. Log in to Amazon ECR
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 7. Setup Docker Buildx
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 8. Build and push Docker image
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 9. Deploy to EC2 through AWS SSM
+      - name: Deploy to EC2
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+          DEPLOY_SCRIPT=$(cat <<EOF
+          set -euo pipefail
+
+          aws ecr get-login-password --region ${AWS_REGION} | \
+            docker login --username AWS --password-stdin ${ECR_REGISTRY}
+
+          cd /opt/student-platform
+
+          export ECR_REGISTRY="${ECR_REGISTRY}"
+          export ECR_REPOSITORY="${ECR_REPOSITORY}"
+          export IMAGE_TAG="${IMAGE_TAG}"
+
+          docker compose pull
+          docker compose up -d --remove-orphans
+
+          # Wait for the application to become healthy.
+          for i in {1..30}; do
+            if curl -fsS http://localhost:3001/ >/dev/null; then
+              echo "Deployment successful"
+              exit 0
+            fi
+
+            sleep 5
+          done
+
+          echo "Application health check failed"
+          docker compose logs --tail=100
+          exit 1
+          EOF
+          )
+
+          PARAMETERS=$(jq -cn --arg script "$DEPLOY_SCRIPT" \
+            '{commands: [$script]}')
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy NestJS application" \
+            --parameters "$PARAMETERS" \
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "SSM Command ID: $COMMAND_ID"
+
+          # Wait for deployment to finish.
+          for i in {1..60}; do
+
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query "Status" \
+              --output text 2>/dev/null || echo "Pending")
+
+            echo "Deployment status: $STATUS"
+
+            case "$STATUS" in
+              Success)
+                echo "EC2 deployment completed successfully"
+                exit 0
+                ;;
+
+              Failed|TimedOut|Cancelled)
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "$EC2_INSTANCE_ID" \
+                  --output json
+                exit 1
+                ;;
+            esac
+
+            sleep 5
+          done
+
+          echo "Deployment timed out"
+          exit 1
