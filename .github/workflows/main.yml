@@ -6,7 +6,7 @@ on:
       - main
     paths:
       - "phase3/**"
-      - ".github/workflows/deploy.yml"
+      - ".github/workflows/main.yml"
 
   workflow_dispatch:
 
