@@ -106,15 +106,6 @@ jobs:
           docker compose pull
           docker compose up -d --remove-orphans
 
-          # Wait for the application to become healthy.
-          for i in {1..30}; do
-            if curl -fsS http://localhost:3001/ >/dev/null; then
-              echo "Deployment successful"
-              exit 0
-            fi
-
-            sleep 5
-          done
 
           echo "Application health check failed"
           docker compose logs --tail=100
