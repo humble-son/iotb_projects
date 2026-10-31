@@ -1,4 +1,4 @@
-name: Build and Deploy NestJS Application
+name: Build and Deploy NextJs Application
 
 on:
   push:
