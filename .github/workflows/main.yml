@@ -105,11 +105,6 @@ jobs:
 
           docker compose pull
           docker compose up -d --remove-orphans
-
-
-          echo "Application health check failed"
-          docker compose logs --tail=100
-          exit 1
           EOF
           )
 
